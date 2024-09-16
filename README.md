@@ -4,7 +4,7 @@ This plugin accelerates the movement of the `neui` keys. It also works in vscode
 
 ## Installation
 
-`baizeyv/fast-cursor-move.nvim`
+`baizeyv/colemak-fast-move.nvim`
 
 ## Usage
 
