@@ -1,123 +1,191 @@
-local fn = vim.fn
-    local api = vim.api
+-- vim script 中的 cursorMove 不支持 select 参数
+-- 所以这里通过lua脚本，同样调用 cursorMove，但是可以传递 select 参数
+-- !但仍然存在问题：
+-- 1. cursorMove 会破坏 visual line 模式，所以 visual line 模式只会保留一次，然后就会变成 visual 模式
+-- 2. 文档中存在有中文时，移动过程中，col 会出现偏移，导致选区不准确
+-- local vim_api = vim.api
+-- 行内移动
+local function moveInLine(d)
+    require('vscode-neovim').action('cursorMove', {
+        args = { {
+            to = d == 'end' and 'wrappedLineEnd' or 'wrappedLineStart',
+            by = 'wrappedLine',
+            -- by = 'line',
+            -- value = vim.v.count1,
+            -- value = vim.v.count,
+            value = 0,
+            select = true
+        } }
+    })
+    return '<Ignore>'
+end
 
-    local ACCELERATION_LIMIT = 150
-    local ACCELERATION_TABLE_VERTICAL = { 7, 12, 17, 21, 24, 26, 28, 30 }
-    local ACCELERATION_TABLE_HORIZONTAL = { 10, 15, 20 }
-    if vim.g.vscode then
-      ACCELERATION_TABLE_VERTICAL = { 7, 12, 17, 21, 24, 26, 28, 30 }
-    end
+-- 行间移动
+local function moveLine(d)
+    -- local current_mode = vim.api.nvim_get_mode().mode
+    require('vscode-neovim').action('cursorMove', {
+        args = { {
+            to = d == 'j' and 'down' or 'up',
+            by = 'wrappedLine',
+            -- by = 'line',
+            value = vim.v.count1,
+            -- value = vim.v.count,
+            select = true
+        } }
+        -- not work
+        -- callback = function()
+        --     -- cb()
+        --     if current_mode == 'V' then
+        --         vim.schedule(function()
+        --             vim_api.nvim_input('V')
+        --         end)
+        --         -- vim_api.nvim_input('V')
+        --         -- vim_api.nvim_feedkeys('V', 'x', false)
+        --         -- vim_api.nvim_feedkeys('V', 'v', true)
+        --         -- debug.debug()
+        --         -- return 'V'
+        --     end
+        --     -- return '<Ignore>'
+        -- end
+    })
+    return '<Ignore>'
+end
 
-    ---VSCode's cursorMove
-    ---@param direction "e" | "u"
-    ---@param step integer
-    ---@return string
-    local function vscode_move(direction, step)
-      local to, by
-      if direction == "e" then
-        to = "down"
-        by = "wrappedLine"
-      elseif direction == "u" then
-        to = "up"
-        by = "wrappedLine"
-      else
-        return step .. direction -- won't happen
-      end
-      fn.VSCodeNotify("cursorMove", { to = to, by = by, value = step })
-      return "<esc>" -- ! need this to clear v:count in vscode
-    end
+local function move(d)
+    return function()
+        -- 获取当前编辑模式
+        local current_mode = vim.api.nvim_get_mode().mode
+        -- Only works in charwise visual and visual line mode
+        -- if current_mode ~= 'v' and current_mode ~= 'V' then
+        --     return 'g' .. d
+        -- end
 
-    -- Main logic
-
-    local get_move_step = (function()
-      local prev_direction
-      local prev_time = 0
-      local move_count = 0
-      return function(direction)
-        if vim.g.fast_cursor_move_acceleration == false then
-          return 1
-        end
-
-        if direction ~= prev_direction then
-          prev_time = 0
-          move_count = 0
-          prev_direction = direction
+        -- 因为 moveCursor 会破坏 visual line 模式，所以 visual line 模式只会保留一次，然后就会变成 visual 模式
+        -- 因此这段逻辑在一次选区的动作中只会执行一次
+        if current_mode == 'V' then
+            moveLine(d)
+            if d == 'j' then
+                moveInLine('end')
+            else
+                moveInLine('start')
+            end
         else
-          local time = vim.loop.hrtime()
-          local elapsed = (time - prev_time) / 1e6
-          if elapsed > ACCELERATION_LIMIT then
-            move_count = 0
-          else
-            move_count = move_count + 1
-          end
-          prev_time = time
-        end
+            -- 获取当前选区的标记的位置（<）
+            local start_pos = vim.api.nvim_buf_get_mark(0, "<")
+            local end_pos = vim.api.nvim_buf_get_mark(0, ">")
+            -- 提取列号 和 行号
+            local start_line = start_pos[1]
+            local start_col = start_pos[2]
+            local end_line = end_pos[1]
+            local end_col = end_pos[2]
 
-        local acceleration_table = (
-          (direction == "e" or direction == "u") and ACCELERATION_TABLE_VERTICAL or ACCELERATION_TABLE_HORIZONTAL
-        )
-        -- calc step
-        for idx, count in ipairs(acceleration_table) do
-          if move_count < count then
-            return idx
-          end
-        end
-        return #acceleration_table
-      end
-    end)()
+            -- 获取光标当前列号
+            local cursor_col = vim.fn.col('.')
+            -- 获取当前行最大列号
+            local line_end_col = vim.fn.col('$')
+            -- 获取选区的结束行文本内容
+            local selected_end_line_text = vim.fn.getline(end_line)
+            -- 获取当前光标位置的行号和列号
+            -- 参数 0 表示当前窗口
+            local cursor = vim.api.nvim_win_get_cursor(0)
+            -- 提取行号
+            local current_line = cursor[1]
 
-    ---@param direction "n" | "e" | "u" | "i"
-    ---@return "h" | "gj" | "gk" | "l"
-    local function get_move_chars(direction)
-      if direction == "e" then
-        return "gj"
-      elseif direction == "u" then
-        return "gk"
-      elseif direction == "n" then
-        return "h"
-      else
-        return "l"
-      end
+            -- 如果选区只有一行，而且整行内容都已被选中
+            -- 那么在执行完行间移动后，就将新行的光标移动到行首或行尾
+            -- 实现模拟 visual line 的效果
+            -- 最后直接返回，不再执行下面的逻辑
+            if start_col == 0 and end_col + 1 == #selected_end_line_text and start_line == end_line then
+                moveLine(d)
+                if d == 'j' then
+                    moveInLine('end')
+                else
+                    moveInLine('start')
+                end
+                return '<Ignore>'
+            end
+
+            -- 其他情况
+            moveLine(d)
+
+            -- k方向，向上移动
+            -- 如果选区的结束行行内容被全选中，那么在执行完行间移动后，就将新行的光标移动到行尾
+            -- 实现模拟 visual line 的效果
+            if end_col + 1 == #selected_end_line_text and current_line < end_line then
+                moveInLine('start')
+                -- return 'V'
+            end
+            -- j方向，向下移动
+            -- 如果选区的开始行行内容被全选中，那么在执行完行间移动后，就将新行的光标移动到行首
+            -- 实现模拟 visual line 的效果
+            if start_col == 0 and current_line > start_line then
+                moveInLine('end')
+                -- return 'V'
+            end
+        end
+        return '<Ignore>'
     end
+end
 
-    local function move(direction)
-      local move_chars = get_move_chars(direction)
+vim.keymap.set('v', 'gj', move('j'), {
+    expr = true,
+    noremap = true,
+    silent = true
+})
+vim.keymap.set('v', 'gk', move('k'), {
+    expr = true,
+    noremap = true,
+    silent = true
+})
 
-      if fn.reg_recording() ~= "" or fn.reg_executing() ~= "" then
-        return move_chars
-      end
-
-      local is_normal = api.nvim_get_mode().mode:lower() == "n"
-      local use_vscode = vim.g.vscode and is_normal and direction ~= "n" and direction ~= "i"
-
-      if vim.v.count > 0 then
-        if use_vscode then
-          return vscode_move(direction, vim.v.count)
+local function moveCursor(d)
+    return function()
+        -- 当 v.count 为 0 时，表示没有使用数字修饰符，此时可以执行自定义的移动
+        -- 否则，执行原生的移动，如 10j
+        if (vim.v.count == 0 and vim.fn.reg_recording() == '' and vim.fn.reg_executing() == '') then
+            return 'g' .. d
         else
-          return move_chars
+            return d
         end
-      end
-
-      local step = get_move_step(direction)
-      if use_vscode then
-        return vscode_move(direction, step)
-      else
-        return step .. move_chars
-      end
     end
+end
 
-    local function setup()
-      for _, motion in ipairs({ "n", "e", "u", "i" }) do
-        vim.keymap.set({ "n", "v" }, motion, function()
-          return move(motion)
-        end, { expr = true })
-      end
-      vim.keymap.set({ "n", "v" }, "E", "5e", { remap = true })
-      vim.keymap.set({ "n", "v" }, "U", "5u", { remap = true })
-      vim.keymap.set({ "o" }, "n", "h")
-      vim.keymap.set({ "o" }, "e", "j")
-      vim.keymap.set({ "o" }, "i", "l")
-      vim.keymap.set({ "o" }, "u", "k")
-    end
+local function prepare()
+    -- 依赖于 gj 和 gk 的定义，所以要放在 gj 和 gk 的后面
+    vim.keymap.set('', 'k', moveCursor('k'), {
+        expr = true,
+        remap = true,
+        silent = true
+    })
+    vim.keymap.set('', 'j', moveCursor('j'), {
+        expr = true,
+        remap = true,
+        silent = true
+    })
+end
 
-    vim.defer_fn(setup, 500)
+
+local function setup()
+    -- initialize gj gk
+    prepare()
+
+    vim.keymap.set('', 'e', moveCursor('j'), {
+        expr = true,
+        remap = true,
+        silent = true
+    })
+    vim.keymap.set('', 'u', moveCursor('k'), {
+        expr = true,
+        remap = true,
+        silent = true
+    })
+
+    vim.keymap.set({ "n", "v" }, "E", "5e", { remap = true })
+    vim.keymap.set({ "n", "v" }, "U", "5u", { remap = true })
+    vim.keymap.set({ "n", "x", "o" }, "n", "h")
+    vim.keymap.set({ "n", "x", "o" }, "e", "j")
+    vim.keymap.set({ "n", "x", "o" }, "i", "l")
+    vim.keymap.set({ "n", "x", "o" }, "u", "k")
+end
+
+vim.defer_fn(setup, 500)
