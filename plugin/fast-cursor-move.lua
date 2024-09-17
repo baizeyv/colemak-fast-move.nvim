@@ -149,8 +149,7 @@ local function prepare()
         expr = true,
         noremap = true,
         silent = true
-    }
-    )
+    })
 end
 
 
@@ -169,8 +168,18 @@ local function setup()
         silent = true
     })
 
-    vim.keymap.set({ "n", "v" }, "E", "5e", { remap = true })
-    vim.keymap.set({ "n", "v" }, "U", "5u", { remap = true })
+    vim.keymap.set({ "n", "v" }, "E", function()
+        for _ = 1, 5 do
+            local expr = moveCursor('j')()
+            vim.cmd('normal! ' .. expr)
+        end
+    end, {noremap = true, silent = true})
+    vim.keymap.set({ "n", "v" }, "U", function()
+        for _ = 1, 5 do
+            local expr = moveCursor('k')()
+            vim.cmd('normal! ' .. expr)
+        end
+    end, {noremap = true, silent = true})
     vim.keymap.set({ "n", "x", "o" }, "n", "h")
     vim.keymap.set({ "n", "x", "o" }, "i", "l")
 end
