@@ -127,17 +127,6 @@ local function move(d)
     end
 end
 
-vim.keymap.set('v', 'gj', move('j'), {
-    expr = true,
-    noremap = true,
-    silent = true
-})
-vim.keymap.set('v', 'gk', move('k'), {
-    expr = true,
-    noremap = true,
-    silent = true
-})
-
 local function moveCursor(d)
     return function()
         -- 当 v.count 为 0 时，表示没有使用数字修饰符，此时可以执行自定义的移动
@@ -151,17 +140,17 @@ local function moveCursor(d)
 end
 
 local function prepare()
-    -- 依赖于 gj 和 gk 的定义，所以要放在 gj 和 gk 的后面
-    vim.keymap.set('', 'k', moveCursor('k'), {
+    vim.keymap.set('v', 'gj', move('j'), {
         expr = true,
-        remap = true,
+        noremap = true,
         silent = true
     })
-    vim.keymap.set('', 'j', moveCursor('j'), {
+    vim.keymap.set('v', 'gk', move('k'), {
         expr = true,
-        remap = true,
+        noremap = true,
         silent = true
-    })
+    }
+    )
 end
 
 
@@ -183,9 +172,7 @@ local function setup()
     vim.keymap.set({ "n", "v" }, "E", "5e", { remap = true })
     vim.keymap.set({ "n", "v" }, "U", "5u", { remap = true })
     vim.keymap.set({ "n", "x", "o" }, "n", "h")
-    vim.keymap.set({ "n", "x", "o" }, "e", "j")
     vim.keymap.set({ "n", "x", "o" }, "i", "l")
-    vim.keymap.set({ "n", "x", "o" }, "u", "k")
 end
 
 vim.defer_fn(setup, 500)
